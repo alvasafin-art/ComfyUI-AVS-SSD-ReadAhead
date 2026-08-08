@@ -262,4 +262,6 @@ Development, debugging and documentation were assisted by OpenAI ChatGPT.
 
 ## License
 
-A license is not included automatically. Before publishing the repository, choose the license you want to use. If you want a simple permissive open-source license, MIT is a common option.
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+
+You are free to use, modify, redistribute, and commercially use this software under the terms of the GPL-3.0 license. Distributed modified versions must remain open source under the GPL-3.0 license.
