@@ -48,6 +48,7 @@ The patch does **not** directly make sampling/inference faster. Its main goal is
 | System RAM | 32 GB |
 | Storage | Slow SATA II SSD |
 | OS | Windows |
+| Page file | 32 GB |
 | ComfyUI | 0.31.1 |
 | PyTorch | 2.13.0+xpu |
 | comfy-kitchen | 0.2.28 |
