@@ -126,7 +126,7 @@ cd /d "PATH\TO\ComfyUI\custom_nodes"
 Then clone the repository:
 
 ```bat
-git clone https://github.com/YOUR_GITHUB_USERNAME/ComfyUI-AVS-SSD-ReadAhead.git
+git clone https://github.com/alvasafin-art/ComfyUI-AVS-SSD-ReadAhead.git
 ```
 
 Restart ComfyUI.
