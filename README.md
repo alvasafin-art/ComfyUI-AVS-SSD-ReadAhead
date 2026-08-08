@@ -1,8 +1,10 @@
 # ComfyUI-AVS-SSD-ReadAhead
 
-**Speed up ComfyUI model loading on slow SSDs on Windows.**
+**Speed up ComfyUI model loading and model switching on slower SSDs on Windows.**
 
-On my test system with a slow SATA II SSD, the measured model-loading time was reduced by roughly **39–47%** in tested Flux, Krea and Z-Image workflows.
+On my test system, the measured model-loading time was reduced by roughly **39–47%** in tested Flux, Krea and Z-Image workflows.
+
+This patch is mainly useful when storage I/O is a bottleneck — for example, SATA SSDs, older SSDs, external SSDs, or other relatively slow storage. Fast NVMe drives may see a smaller benefit.
 
 > **Status:** Windows-only, GPU-vendor neutral in the ReadAhead code path.  
 > **Tested hardware:** Intel Arc B580 12 GB.  
@@ -27,16 +29,18 @@ It does **not** modify model weights, image quality, sampling, GPU kernels, mode
 
 ## Who is this for?
 
-This patch is mainly intended for:
+This patch is mainly intended for Windows systems where model loading is limited by storage speed.
 
-- Windows;
-- large ComfyUI models;
-- slow SATA / SATA II / older SSDs;
-- systems where model loading and model switching are noticeably slower than generation itself.
+It may be useful for:
 
-A fast NVMe SSD may show a much smaller improvement or no meaningful improvement.
+- SATA SSDs;
+- older or slower SSDs;
+- external SSDs;
+- systems using large ComfyUI models where model loading and model switching cause noticeable disk I/O delays.
 
-The patch does **not** directly make sampling/inference faster. Its main goal is faster **model loading and model switching**.
+Fast NVMe SSDs may see a smaller improvement or no meaningful improvement.
+
+The patch does **not** directly make sampling or inference faster. Its main goal is to reduce **model loading and model switching time**.
 
 ## Benchmark
 
@@ -46,7 +50,7 @@ The patch does **not** directly make sampling/inference faster. Its main goal is
 |---|---|
 | GPU | Intel Arc B580 12 GB |
 | System RAM | 32 GB |
-| Storage | Slow SATA II SSD |
+| Storage | Crucial MX500 SATA SSD |
 | OS | Windows |
 | Page file | 32 GB |
 | ComfyUI | 0.31.1 |
@@ -81,7 +85,7 @@ Validated Intel Arc B580 configuration:
 | Argument | For the patch? | Notes |
 |---|---|---|
 | `--cache-classic` | **Strongly recommended for the tested ComfyUI 0.31.1 setup** | In heavy multi-model switching, the default RAM-pressure cache crashed on the test system even without ReadAhead. The same sequence was stable with `--cache-classic`. |
-| `--disable-async-offload` | **Required for the validated Intel Arc B580 setup for the tested ComfyUI 0.31.1 setup** | On the tested XPU stack, ReadAhead + 2 async-offload streams repeatedly caused native crashes. One stream was not faster. |
+| `--disable-async-offload` | **Required for the validated Intel Arc B580 / ComfyUI 0.31.1 configuration** | On the tested XPU stack, ReadAhead + 2 async-offload streams repeatedly caused native crashes. One stream was not faster. |
 | `--enable-triton-backend` | **No / optional** | Not used by ReadAhead. It was enabled in the benchmark because it improved compute performance on the test system. |
 | `--oneapi-device-selector level_zero:gpu` | **No / Intel-only** | Selects the Intel Level Zero GPU. Not needed for NVIDIA or AMD. |
 | `--enable-manager` | **No / optional** | Only needed if you want ComfyUI-Manager enabled. It is unrelated to ReadAhead. |
@@ -231,7 +235,7 @@ Useful options include:
 
 - Windows only.
 - Tested only on Intel Arc B580 so far.
-- Best suited to slow SSDs; fast NVMe systems may see little benefit.
+- Best suited to systems where storage I/O is a bottleneck; fast NVMe systems may see a smaller benefit or no meaningful improvement.
 - The validated ComfyUI 0.31.1 setup uses `--cache-classic`.
 - The validated Intel XPU setup uses `--disable-async-offload`.
 - Model files smaller than 2 GiB are ignored by default.
