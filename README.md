@@ -81,7 +81,7 @@ Validated Intel Arc B580 configuration:
 | Argument | For the patch? | Notes |
 |---|---|---|
 | `--cache-classic` | **Strongly recommended for the tested ComfyUI 0.31.1 setup** | In heavy multi-model switching, the default RAM-pressure cache crashed on the test system even without ReadAhead. The same sequence was stable with `--cache-classic`. |
-| `--disable-async-offload` | **Required for the validated Intel Arc B580 setup** | On the tested XPU stack, ReadAhead + 2 async-offload streams repeatedly caused native crashes. One stream was not faster. |
+| `--disable-async-offload` | **Required for the validated Intel Arc B580 setup for the tested ComfyUI 0.31.1 setup** | On the tested XPU stack, ReadAhead + 2 async-offload streams repeatedly caused native crashes. One stream was not faster. |
 | `--enable-triton-backend` | **No / optional** | Not used by ReadAhead. It was enabled in the benchmark because it improved compute performance on the test system. |
 | `--oneapi-device-selector level_zero:gpu` | **No / Intel-only** | Selects the Intel Level Zero GPU. Not needed for NVIDIA or AMD. |
 | `--enable-manager` | **No / optional** | Only needed if you want ComfyUI-Manager enabled. It is unrelated to ReadAhead. |
