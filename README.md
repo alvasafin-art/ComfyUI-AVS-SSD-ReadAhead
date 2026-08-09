@@ -7,8 +7,6 @@ On my test system, the measured model-loading time was reduced by roughly **39�
 This patch is mainly useful when storage I/O is a bottleneck — for example, SATA SSDs, older SSDs, external SSDs, or other relatively slow storage. Fast NVMe drives may see a smaller benefit.
 
 > **Status:** Windows-only, GPU-vendor neutral in the ReadAhead code path.  
-> **Tested hardware:** Intel Arc B580 12 GB.  
-> **NVIDIA / AMD:** not tested yet — please treat those backends as experimental and report results.
 
 ## What it does
 
@@ -60,7 +58,7 @@ The patch does **not** directly make sampling or inference faster. Its main goal
 | Python | 3.13.12 |
 | Patch | v0.9.0 |
 
-The comparison below uses the same machine and the same stable launch configuration. The baseline uses `--cache-classic` with ReadAhead disabled. The patched result uses v0.9.0.
+The comparison below uses the same machine and the same stable launch configuration. The baseline uses `--cache-classic` with ReadAhead disabled. The patched result uses v0.9.0. On my system, in the Comfyu 0.31.1 update, regardless of whether I use ReadAhead or not, I get crashes without `--cache-classic`
 
 ### Model-loading results
 
@@ -71,30 +69,6 @@ The comparison below uses the same machine and the same stable launch configurat
 | Z-Image Turbo FP8 AIO | 36.33 s | 22.16 s | **39.0%** |
 
 **Important benchmark note:** Flux/Krea use the benchmark's aggregated model-load timing. Z-Image AIO reports its loading differently, so the table uses its loader-node time. These numbers are practical measurements from one system, not guaranteed performance for every PC. Windows file-cache state, RAM, storage speed, model format and workflow can all affect results.
-
-## Tested launch arguments
-
-Validated Intel Arc B580 configuration:
-
-```text
---cache-classic --disable-async-offload --enable-triton-backend --oneapi-device-selector level_zero:gpu
-```
-
-### Which arguments are actually required?
-
-| Argument | For the patch? | Notes |
-|---|---|---|
-| `--cache-classic` | **Strongly recommended for the tested ComfyUI 0.31.1 setup** | In heavy multi-model switching, the default RAM-pressure cache crashed on the test system even without ReadAhead. The same sequence was stable with `--cache-classic`. |
-| `--disable-async-offload` | **Required for the validated Intel Arc B580 / ComfyUI 0.31.1 configuration** | On the tested XPU stack, ReadAhead + 2 async-offload streams repeatedly caused native crashes. One stream was not faster. |
-| `--enable-triton-backend` | **No / optional** | Not used by ReadAhead. It was enabled in the benchmark because it improved compute performance on the test system. |
-| `--oneapi-device-selector level_zero:gpu` | **No / Intel-only** | Selects the Intel Level Zero GPU. Not needed for NVIDIA or AMD. |
-| `--enable-manager` | **No / optional** | Only needed if you want ComfyUI-Manager enabled. It is unrelated to ReadAhead. |
-
-### NVIDIA / AMD note
-
-The ReadAhead implementation itself does not contain Intel-specific GPU code, so it is designed to be GPU-vendor neutral on Windows.
-
-However, **only Intel Arc B580 has been tested so far**. NVIDIA and AMD can use different memory/offload defaults, so do not assume the Intel launch arguments are optimal for those GPUs. Please report your GPU, RAM, storage type, ComfyUI/PyTorch versions, launch arguments and results if you test another backend.
 
 ## Installation
 
@@ -234,10 +208,7 @@ Useful options include:
 ## Known limitations
 
 - Windows only.
-- Tested only on Intel Arc B580 so far.
 - Best suited to systems where storage I/O is a bottleneck; fast NVMe systems may see a smaller benefit or no meaningful improvement.
-- The validated ComfyUI 0.31.1 setup uses `--cache-classic`.
-- The validated Intel XPU setup uses `--disable-async-offload`.
 - Model files smaller than 2 GiB are ignored by default.
 - This patch accelerates file/model loading, not the diffusion sampler itself.
 
