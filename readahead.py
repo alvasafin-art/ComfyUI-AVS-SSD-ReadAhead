@@ -185,8 +185,10 @@ limit = int(sys.argv[3])
 if hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_WILLNEED"):
     try:
         fd = os.open(path, os.O_RDONLY)
-        os.posix_fadvise(fd, 0, limit, os.POSIX_FADV_WILLNEED)
-        os.close(fd)
+        try:
+            os.posix_fadvise(fd, 0, limit, os.POSIX_FADV_WILLNEED)
+        finally:
+            os.close(fd)
     except Exception:
         pass
 
