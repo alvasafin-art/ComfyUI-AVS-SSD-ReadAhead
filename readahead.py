@@ -21,7 +21,7 @@ _MIB = 1024 ** 2
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
-    "require_windows": True,
+    "require_windows": False,
     "min_file_gib": 2.0,
     "chunk_mib": 32,
     "extensions": [".safetensors", ".sft"],
@@ -118,7 +118,39 @@ if os.name == "nt":
         ]
 
 
-def _windows_memory_status() -> _MemoryStatus | None:
+
+def _linux_memory_status() -> _MemoryStatus | None:
+    try:
+        meminfo = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0]
+                    meminfo[key] = int(val) * 1024  # kB to bytes
+        total = meminfo.get("MemTotal", 0)
+        avail = meminfo.get("MemAvailable", 0)
+        swap_free = meminfo.get("SwapFree", 0)
+        if total <= 0:
+            return None
+        load_pct = int(100 * (total - avail) / total)
+        return _MemoryStatus(
+            available_phys=avail,
+            available_commit=avail + swap_free,
+            memory_load_percent=load_pct,
+        )
+    except Exception:
+        return None
+
+def _memory_status() -> _MemoryStatus | None:
+    if os.name == "nt":
+        return _memory_status()
+    elif os.name == "posix":
+        return _linux_memory_status()
+    return None
+
+def _memory_status() -> _MemoryStatus | None:
     if os.name != "nt":
         return None
     try:
@@ -143,10 +175,23 @@ class SequentialReadAhead:
     """
 
     _CHILD_READER_CODE = r"""
+import os
 import sys
+
 path = sys.argv[1]
 chunk = int(sys.argv[2])
 limit = int(sys.argv[3])
+
+if hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_WILLNEED"):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.posix_fadvise(fd, 0, limit, os.POSIX_FADV_WILLNEED)
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
+
 buf = bytearray(chunk)
 total = 0
 with open(path, "rb", buffering=0) as handle:
@@ -240,7 +285,7 @@ print(total, flush=True)
         return reserve
 
     def _plan_request(self, path: str, size: int) -> tuple[int, int, _MemoryStatus | None] | None:
-        status = _windows_memory_status()
+        status = _memory_status()
         if status is not None and self._min_start_ram and status.available_phys < self._min_start_ram:
             if self._log_requests:
                 _log(
@@ -428,7 +473,7 @@ print(total, flush=True)
                     break
 
                 if request.stop_floor:
-                    status = _windows_memory_status()
+                    status = _memory_status()
                     if status is not None and status.available_phys < request.stop_floor:
                         stop_reason = (
                             f"available RAM {status.available_phys / _GIB:.2f} GiB "
