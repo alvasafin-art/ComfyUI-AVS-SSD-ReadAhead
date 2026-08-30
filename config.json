@@ -1,25 +1,3 @@
 {
-  "enabled": true,
-  "require_windows": true,
-  "min_file_gib": 2.0,
-  "chunk_mib": 32,
-  "extensions": [
-    ".safetensors",
-    ".sft"
-  ],
-  "log_requests": true,
-  "foreground_adaptive_budget": true,
-  "foreground_min_start_ram_gib": 3.5,
-  "foreground_stop_ram_gib": 2.5,
-  "foreground_ram_check_mib": 256,
-  "foreground_base_reserve_gib": 3.0,
-  "foreground_model_reserve_ratio": 0.5,
-  "foreground_model_reserve_min_gib": 2.0,
-  "foreground_model_reserve_max_gib": 7.0,
-  "foreground_min_budget_gib": 1.0,
-  "foreground_max_budget_gib": 0.0,
-  "cancel_reader_at_sampler_start": true,
-  "sampler_cancel_wait_ms": 350,
-  "warn_nonclassic_cache": true,
-  "warn_xpu_async_offload": true
+  "enabled": true
 }

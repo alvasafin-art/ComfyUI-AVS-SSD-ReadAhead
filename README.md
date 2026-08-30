@@ -2,47 +2,146 @@
 
 **Speed up ComfyUI model loading and model switching on slower SSDs on Windows.**
 
-On my test system, the measured model-loading time was reduced by roughly **39–47%** in tested Flux, Krea and Z-Image workflows.
-
-This patch is mainly useful when storage I/O is a bottleneck — for example, SATA SSDs, older SSDs, external SSDs, or other relatively slow storage. Fast NVMe drives may see a smaller benefit.
-
 > **Status:** Windows-only, GPU-vendor neutral in the ReadAhead code path.  
+> **Current patch:** v1.0.0, rebuilt around the current lifecycle and protections of ComfyUI PR #15538 as of 2026-08-27.  
+> **Activation:** standalone custom node + Application Settings toggle. No ReadAhead CLI argument is added or required.
 
 ## What it does
 
-ComfyUI-AVS-SSD-ReadAhead speeds up loading of large `.safetensors` / `.sft` model files by reading them sequentially into the Windows file cache while ComfyUI is loading the same model.
+AVS SSD ReadAhead starts a short-lived helper Python process when ComfyUI begins loading a large `.safetensors` or `.sft` file. The helper reads the file sequentially so Windows can populate its normal file cache while ComfyUI continues through its standard model-loading path.
 
-In simple terms:
+ComfyUI remains authoritative. The helper never replaces the loader and never modifies model weights, sampling, VRAM residency, mmap ownership, device transfers, unload policy, GPU synchronization, or image quality.
 
-1. ComfyUI starts loading a large model.
-2. The patch starts a small helper process.
-3. The helper reads the model file sequentially from disk.
-4. Windows keeps the recently read data in file cache / RAM.
-5. ComfyUI can then obtain more of the model data from memory instead of repeatedly waiting on a slow SSD.
-6. The helper stops before sampling begins.
+The optimization is mainly useful when storage I/O is a bottleneck: SATA SSDs, older SSDs, external SSDs, or other relatively slow storage. Fast NVMe systems may see a smaller benefit or no meaningful benefit.
 
-The patch uses an **adaptive RAM budget**. If there is not enough free physical memory, it warms only part of the file or skips ReadAhead completely and lets stock ComfyUI load the model normally.
+## v1.0 safety model
 
-It does **not** modify model weights, image quality, sampling, GPU kernels, model unload logic, VRAM residency, Triton, CUDA/XPU transfers, or mmap objects.
+The old standalone implementation has been simplified to follow the current PR #15538 behavior instead of carrying separate tuning logic.
 
-## Who is this for?
+ReadAhead now uses:
 
-This patch is mainly intended for Windows systems where model loading is limited by storage speed.
+- `.safetensors` / `.sft` only;
+- minimum candidate file size: **2 GiB**;
+- sequential read chunk: **32 MiB**;
+- current physical RAM from `psutil.virtual_memory().available`;
+- fixed RAM reserve: **3 GiB**;
+- model-derived reserve: **50% of model file size**, clamped to **2–7 GiB**;
+- minimum useful warm budget: **1 GiB**.
 
-It may be useful for:
+Lifecycle protections:
 
-- SATA SSDs;
-- older or slower SSDs;
-- external SSDs;
-- systems using large ComfyUI models where model loading and model switching cause noticeable disk I/O delays.
+- a newer model request supersedes and terminates the active older helper;
+- ReadAhead is stopped after model preparation and before sampling proceeds;
+- RAM is monitored while the helper is active;
+- if available RAM falls below the calculated reserve, the helper is terminated;
+- if the RAM query is unavailable, ReadAhead stops/skips instead of guessing;
+- helper terminate/kill waits are bounded;
+- helper output is validated before a read is reported as completed;
+- ComfyUI shutdown terminates the helper and worker;
+- helper failures remain best-effort failures: normal ComfyUI model loading continues.
 
-Fast NVMe SSDs may see a smaller improvement or no meaningful improvement.
+## Application Settings toggle
 
-The patch does **not** directly make sampling or inference faster. Its main goal is to reduce **model loading and model switching time**.
+Open **Settings → AVS-ReadAhead** and use **Enable AVS SSD ReadAhead**.
 
-## Benchmark
+- **ON** — the standalone ReadAhead controller is active on Windows.
+- **OFF** — pending/active ReadAhead is stopped and future ReadAhead requests are no-ops.
+- No custom-node folder removal is required.
+- No ComfyUI restart is required to switch ON/OFF.
+- The state is written to `config.json`, so it survives restart and also applies when ComfyUI is used headlessly/API-only.
 
-### Test system
+The frontend setting is synchronized from the backend configuration on page load. This prevents an old browser-side default from accidentally re-enabling a patch that was deliberately disabled in `config.json`.
+
+## Configuration
+
+v1.0 intentionally reduces `config.json` to one production setting:
+
+```json
+{
+  "enabled": true
+}
+```
+
+The old advanced tuning keys are no longer used. Keeping the PR constants in code avoids a standalone configuration silently drifting away from the reviewed implementation.
+
+## How the standalone hooks map to PR #15538
+
+The upstream PR can modify ComfyUI core directly; a custom node cannot. v1.0 therefore uses two small permanent wrappers:
+
+1. `comfy.utils.load_torch_file` requests ReadAhead immediately before the normal model-file load.
+2. `comfy.sampler_helpers._prepare_sampling` stops the standalone helper after model preparation returns and before sampling proceeds.
+
+The wrappers remain installed when the toggle is OFF, but their controller is inert. Live unpatch/repatch is intentionally avoided because changing function objects while workflows are running would create unnecessary race conditions.
+
+If a future ComfyUI release ships the native ReadAhead implementation and its own native reader is explicitly active, the standalone wrapper detects it and avoids starting a second helper.
+
+## What was removed from v0.9.x
+
+The following standalone-only code/configuration was removed because it is not part of the current PR design:
+
+- separate `foreground_min_start_ram_gib` and `foreground_stop_ram_gib` floors;
+- `foreground_ram_check_mib`;
+- `foreground_max_budget_gib`;
+- configurable chunk/extensions/budget policy;
+- ReadAhead environment-variable activation/tuning overrides;
+- the old `KSAMPLER.sample` cancellation wrapper;
+- cache-mode warnings;
+- XPU async-offload warnings;
+- old runtime/cache/backend inspection used only by those warnings.
+
+No `--enable-model-readahead` argument is added by this standalone patch.
+
+## Installation
+
+### ZIP
+
+1. Fully close ComfyUI.
+2. Put the repository folder at:
+
+```text
+ComfyUI/custom_nodes/ComfyUI-AVS-SSD-ReadAhead/
+```
+
+3. Start ComfyUI.
+4. Open **Settings → AVS-ReadAhead** to verify the toggle.
+
+### Git
+
+```bat
+cd /d "PATH\TO\ComfyUI\custom_nodes"
+git clone https://github.com/alvasafin-art/ComfyUI-AVS-SSD-ReadAhead.git
+```
+
+Restart ComfyUI after installing or updating repository files. After that, normal ON/OFF changes from Application Settings are immediate and do not require another restart.
+
+No extra Python package needs to be installed on a current ComfyUI build; `psutil` is already part of ComfyUI's requirements.
+
+## Safe update from v0.9.x
+
+For a clean update, fully stop ComfyUI and replace the old repository files with v1.0.0. In particular, replace the old multi-option `config.json` with the new minimal one.
+
+Make sure there is only one AVS/Sequential ReadAhead custom-node directory. A duplicate old folder can otherwise wrap the same ComfyUI functions twice; v1.0 detects the known old wrapper marker and refuses to stack on top of it.
+
+## How to check that it is active
+
+At startup on Windows, expect a line similar to:
+
+```text
+[AVS ReadAhead] Installed v1.0.0: enabled=True, active=True, load-hook=True, pre-sampling-stop=True, chunk=32 MiB
+```
+
+When a candidate model is requested, typical messages are:
+
+```text
+[AVS ReadAhead] queued model.safetensors: file ... GiB, budget ... GiB, RAM reserve ... GiB ...
+[AVS ReadAhead] done model.safetensors: warmed ... GiB in ...s (... GiB/s)
+```
+
+Cancellation is also explicit, for example `newer model requested`, `sampling starting`, RAM reserve pressure, or shutdown.
+
+## Historical benchmark from v0.9.0
+
+The original patch was benchmarked on one system and showed roughly **39–47% lower measured model-loading time** in the tested workflows. These are historical v0.9.0 measurements, not a performance guarantee for v1.0.0.
 
 | Component | Tested configuration |
 |---|---|
@@ -53,14 +152,8 @@ The patch does **not** directly make sampling or inference faster. Its main goal
 | Page file | 32 GB |
 | ComfyUI | 0.31.1 |
 | PyTorch | 2.13.0+xpu |
-| comfy-kitchen | 0.2.28 |
-| comfy-aimdo | 0.4.13 |
 | Python | 3.13.12 |
 | Patch | v0.9.0 |
-
-The comparison below uses the same machine and the same stable launch configuration. The baseline uses `--cache-classic` with ReadAhead disabled. The patched result uses v0.9.0. On my system, in the Comfyu 0.31.1 update, regardless of whether I use ReadAhead or not, I get crashes without `--cache-classic`
-
-### Model-loading results
 
 | Model / workflow | Without ReadAhead | With v0.9.0 | Time reduction |
 |---|---:|---:|---:|
@@ -68,153 +161,11 @@ The comparison below uses the same machine and the same stable launch configurat
 | Krea 2 Turbo FP8 | 76.32 s | 45.05 s | **41.0%** |
 | Z-Image Turbo FP8 AIO | 36.33 s | 22.16 s | **39.0%** |
 
-**Important benchmark note:** Flux/Krea use the benchmark's aggregated model-load timing. Z-Image AIO reports its loading differently, so the table uses its loader-node time. These numbers are practical measurements from one system, not guaranteed performance for every PC. Windows file-cache state, RAM, storage speed, model format and workflow can all affect results.
-
-## Installation
-
-No extra Python packages are required.
-
-### Option 1 — Download ZIP
-
-1. Open this GitHub repository.
-2. Click **Code**.
-3. Click **Download ZIP**.
-4. Fully close ComfyUI.
-5. Extract the repository folder into:
-
-```text
-ComfyUI/custom_nodes/
-```
-
-You should end up with something like:
-
-```text
-ComfyUI/custom_nodes/ComfyUI-AVS-SSD-ReadAhead/
-```
-
-6. Start ComfyUI.
-
-### Option 2 — Install with Git from CMD
-
-Open **Command Prompt** and go to your ComfyUI `custom_nodes` folder:
-
-```bat
-cd /d "PATH\TO\ComfyUI\custom_nodes"
-```
-
-Then clone the repository:
-
-```bat
-git clone https://github.com/alvasafin-art/ComfyUI-AVS-SSD-ReadAhead.git
-```
-
-Restart ComfyUI.
-
-### Update with Git
-
-```bat
-cd /d "PATH\TO\ComfyUI\custom_nodes\ComfyUI-AVS-SSD-ReadAhead"
-git pull
-```
-
-Then restart ComfyUI.
-
-### Uninstall
-
-Fully close ComfyUI and delete:
-
-```text
-ComfyUI/custom_nodes/ComfyUI-AVS-SSD-ReadAhead
-```
-
-## How to check that it is active
-
-At startup you should see a line similar to:
-
-```text
-[Sequential ReadAhead] Installed v0.9.0 (...): isolated cached read-ahead=True, adaptive-budget=True, sampler-stop=True, ... unload/model-memory hooks=none
-```
-
-When a large model is loaded, you should see messages similar to:
-
-```text
-[Sequential ReadAhead] queued model.safetensors: file 8.79 GiB, warm budget 8.79 GiB ...
-[Sequential ReadAhead] start isolated model.safetensors ...
-[Sequential ReadAhead] done isolated model.safetensors: warmed 8.79/8.79 GiB ...
-```
-
-If RAM is limited, a smaller prefix may be warmed. This is normal.
-
-## How the adaptive RAM protection works
-
-For large files, the patch calculates approximately:
-
-```text
-warm_budget = available RAM - safety reserve
-```
-
-Default safety reserve:
-
-```text
-3 GiB + 50% of the current model-file size
-```
-
-The model-derived part is limited to 2–7 GiB.
-
-Examples with the default settings:
-
-- Flux 8.79 GiB file → about 7.4 GiB RAM reserve
-- Krea 12.24 GiB file → about 9.1 GiB RAM reserve
-
-If the useful ReadAhead budget would be below 1 GiB, the patch skips ReadAhead for that file and stock ComfyUI continues normally.
-
-## Default behavior / safety
-
-The production v0.9.0 path intentionally stays small.
-
-It uses:
-
-- ordinary cached sequential file reading;
-- a short-lived helper process;
-- adaptive physical-RAM budgeting;
-- helper cancellation before sampling.
-
-It does **not** use:
-
-- model-unload hooks;
-- partial-unload hooks;
-- `EmptyWorkingSet`;
-- mmap bouncing;
-- custom GPU synchronization;
-- sleeps/delays around model operations;
-- GPU-vendor-specific ReadAhead code.
-
-## Configuration
-
-Advanced settings are in `config.json`.
-
-For the tested 32 GB RAM system, the default values are recommended.
-
-Useful options include:
-
-- `min_file_gib` — minimum model file size to use ReadAhead;
-- `chunk_mib` — sequential read chunk size;
-- `foreground_base_reserve_gib` — fixed physical-RAM reserve;
-- `foreground_model_reserve_ratio` — model-size-based reserve;
-- `foreground_min_budget_gib` — skip ReadAhead if the useful warm prefix is too small;
-- `foreground_max_budget_gib` — optional hard cap; `0` means no additional cap;
-- `cancel_reader_at_sampler_start` — stop helper before sampling.
-
-## Known limitations
-
-- Windows only.
-- Best suited to systems where storage I/O is a bottleneck; fast NVMe systems may see a smaller benefit or no meaningful improvement.
-- Model files smaller than 2 GiB are ignored by default.
-- This patch accelerates file/model loading, not the diffusion sampler itself.
+Windows file-cache state, available RAM, storage speed, model format, and workflow can materially change the result. The patch accelerates model/file loading, not diffusion sampling itself.
 
 ## Reporting issues / useful test data
 
-If you report a problem or benchmark, please include:
+Please include:
 
 - GPU model;
 - system RAM;
@@ -222,13 +173,10 @@ If you report a problem or benchmark, please include:
 - Windows version;
 - ComfyUI version;
 - PyTorch version;
-- comfy-kitchen version;
-- launch arguments;
 - model names / quantization;
 - exact model-switching sequence;
-- relevant `[Sequential ReadAhead]` log lines.
-
-For performance comparisons, test the same workflow and launch arguments with and without the patch.
+- whether `AVS-ReadAhead` is ON or OFF;
+- relevant `[AVS ReadAhead]` log lines.
 
 ## Credits
 
@@ -238,6 +186,4 @@ Development, debugging and documentation were assisted by OpenAI ChatGPT.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
-
-You are free to use, modify, redistribute, and commercially use this software under the terms of the GPL-3.0 license. Distributed modified versions must remain open source under the GPL-3.0 license.
+GNU General Public License v3.0 (GPL-3.0).

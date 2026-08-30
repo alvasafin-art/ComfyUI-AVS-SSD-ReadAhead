@@ -1,19 +1,20 @@
-"""ComfyUI Sequential ReadAhead v0.9.0.
+"""AVS SSD ReadAhead for ComfyUI.
 
-Production cleanup of the validated v0.8 I/O path:
-- Windows ordinary cached sequential prefetch in a short-lived helper process
-- adaptive RAM-bounded warm-prefix budgeting
-- helper cancellation before sampling
-- capability-based ComfyUI hooks; no hard ComfyUI/GPU-vendor lock
-- no model-unload hooks, working-set trimming, mmap bouncing, sleeps, or
-  custom device-transfer synchronization
+Standalone custom-node adaptation of the Windows model ReadAhead PR. It keeps
+ComfyUI's normal model loader authoritative and adds no command-line argument.
 """
-
-from .readahead import install_patch
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
+WEB_DIRECTORY = "./web"
 
-install_patch()
+# ComfyUI loads this directory as a package. The guard also lets static tools and
+# standalone test discovery inspect the repository without a running ComfyUI.
+if __package__:
+    from .readahead import install_patch
+    from .settings_api import register_routes
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+    install_patch()
+    register_routes()
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
